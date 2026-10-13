@@ -1,0 +1,82 @@
+name: Build DANNE TONTINE APK
+
+on:
+workflow_dispatch:
+push:
+paths:
+- '**.zip'
+- '.github/workflows/build-apk.yml'
+
+jobs:
+build:
+runs-on: ubuntu-latest
+
+steps:
+  - name: Télécharger le dépôt
+    uses: actions/checkout@v4
+
+  - name: Installer Java
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: '17'
+
+  - name: Installer Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: '20'
+
+  - name: Installer unzip
+    run: sudo apt-get update && sudo apt-get install -y unzip
+
+  - name: Extraire le projet
+    run: |
+      ZIP_FILE=$(find . -maxdepth 2 -type f -name '*.zip' -not -path './.git/*' | head -n 1)
+      if [ -z "$ZIP_FILE" ]; then
+        echo "ERREUR : aucun fichier ZIP trouvé dans le dépôt."
+        exit 1
+      fi
+      mkdir -p extracted
+      unzip -o "$ZIP_FILE" -d extracted
+      PACKAGE_FILE=$(find extracted -type f -name package.json | head -n 1)
+      if [ -z "$PACKAGE_FILE" ]; then
+        echo "ERREUR : package.json introuvable."
+        exit 1
+      fi
+      PROJECT_DIR=$(dirname "$PACKAGE_FILE")
+      echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+      echo "Projet trouvé dans : $PROJECT_DIR"
+
+  - name: Installer les dépendances
+    run: |
+      cd "$PROJECT_DIR"
+      if [ -f package-lock.json ]; then
+        npm ci
+      else
+        npm install
+      fi
+
+  - name: Construire le site web
+    run: |
+      cd "$PROJECT_DIR"
+      npm run build --if-present
+
+  - name: Préparer Android avec Capacitor
+    run: |
+      cd "$PROJECT_DIR"
+      if [ -f capacitor.config.ts ] || [ -f capacitor.config.json ] || [ -f capacitor.config.js ]; then
+        npx cap sync android
+      fi
+
+  - name: Compiler l'APK
+    run: |
+      cd "$PROJECT_DIR/android"
+      chmod +x gradlew
+      ./gradlew assembleDebug
+
+  - name: Publier l'APK à télécharger
+    uses: actions/upload-artifact@v4
+    with:
+      name: DANNE-TONTINE-APK
+      path: ${{ env.PROJECT_DIR }}/android/app/build/outputs/apk/debug/app-debug.apk
+      if-no-files-found: error
